@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>个人项目集</title>
+<link rel="stylesheet" href="style.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⭐</text></svg>" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">⭐</span> 个人项目集</div>
+  <nav class="views">
+    <button class="view-btn active" data-view="dashboard">总览</button>
+    <button class="view-btn" data-view="timeline">时间线</button>
+  </nav>
+  <div class="top-right">
+    <span id="save-state" class="save-state"></span>
+    <button id="btn-add" class="btn primary">＋ 新建项目</button>
+  </div>
+</header>
+
+<main id="main"></main>
+
+<!-- 详情抽屉 -->
+<div id="overlay" class="overlay hidden"></div>
+<aside id="drawer" class="drawer hidden"></aside>
+
+<script src="app.js"></script>
+</body>
+</html>

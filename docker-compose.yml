@@ -1,0 +1,10 @@
+services:
+  personal-projects:
+    image: personal-projects:latest
+    build: .
+    container_name: personal-projects
+    restart: unless-stopped
+    ports:
+      - "4173:4173"
+    volumes:
+      - ./data:/app/data
