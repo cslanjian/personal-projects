@@ -51,14 +51,18 @@ jobs:
 
       # 供无法直接 pull ghcr 的环境（如 udocker）离线导入
       - name: Export offline tarballs
+        shell: bash
         run: |
-          IMG="ghcr.io/${{ github.repository }}:latest"
-          docker pull --platform linux/amd64 "$IMG"
-          docker save "$IMG" | gzip > personal-projects-amd64.tar.gz
-          docker rmi "$IMG" >/dev/null 2>&1 || true
-          docker pull --platform linux/arm64 "$IMG"
-          docker save "$IMG" | gzip > personal-projects-arm64.tar.gz
-          docker rmi "$IMG" >/dev/null 2>&1 || true
+          set -euo pipefail
+          for ARCH in amd64 arm64; do
+            echo "==> exporting linux/$ARCH"
+            docker buildx build \
+              --platform "linux/$ARCH" \
+              --cache-from type=gha \
+              --tag "personal-projects:$ARCH" \
+              --output "type=docker,dest=-" . | gzip > "personal-projects-$ARCH.tar.gz"
+            ls -lh "personal-projects-$ARCH.tar.gz"
+          done
 
       - name: Upload tarballs
         uses: actions/upload-artifact@v4
