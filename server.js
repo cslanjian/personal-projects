@@ -9,6 +9,14 @@ const fs = require("fs");
 const path = require("path");
 
 const PORT = process.env.PORT || 4173;
+/**
+ * 访问限制开关：
+ * - 未设置 HOST（或设为 0.0.0.0 / :: / 空）：监听所有网卡，局域网/外部均可访问
+ * - 设置了 HOST（如 HOST=127.0.0.1）：网络层只绑定该地址，且应用层拒绝一切非回环来源
+ * 应用层拒绝基于 socket 真实来源地址，不信任 X-Forwarded-For 等可伪造头。
+ */
+const HOST = (process.env.HOST || "").trim();
+const RESTRICT_LOOPBACK = HOST !== "" && HOST !== "0.0.0.0" && HOST !== "::";
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const DATA_DIR = path.join(ROOT, "data");
@@ -186,9 +194,22 @@ function serveStatic(req, res, urlPath) {
   });
 }
 
+function isLoopback(addr) {
+  if (!addr) return false;
+  let a = String(addr).toLowerCase();
+  if (a.startsWith("::ffff:")) a = a.slice(7); // IPv6 映射的 IPv4 地址
+  return a === "127.0.0.1" || a === "::1" || a.startsWith("::ffff:127.");
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   const pathname = decodeURIComponent(url.pathname);
+
+  // 应用层访问控制：限本机模式时，非回环来源一律拒绝（先于任何静态/接口处理）
+  if (RESTRICT_LOOPBACK && !isLoopback(req.socket.remoteAddress)) {
+    console.warn(`[blocked] 非本机来源被拒绝: ${req.socket.remoteAddress} -> ${pathname}`);
+    return sendJSON(res, 403, { error: "本服务已配置为仅限本机访问" });
+  }
 
   if (pathname === "/api/data") {
     if (req.method === "GET") {
@@ -218,9 +239,16 @@ const server = http.createServer(async (req, res) => {
 });
 
 ensureData();
-server.listen(PORT, () => {
+// 未显式指定 HOST 时绑定 0.0.0.0（IPv4 全网卡）：
+// Node 默认会绑定 IPv6 通配符 ::，部分网络环境（含本机自连局域网 IP）会出现请求无响应
+server.listen(PORT, HOST || "0.0.0.0", () => {
   console.log("");
   console.log("  ⭐ 个人项目集已启动");
   console.log(`  ➜  在浏览器打开: http://localhost:${PORT}`);
+  if (RESTRICT_LOOPBACK) {
+    console.log(`  🔒 已启用仅本机访问模式（HOST=${HOST}），非回环来源将被应用层拒绝`);
+  } else {
+    console.log("  🌐 未设置 HOST，监听所有网卡，局域网/外部可访问");
+  }
   console.log("");
 });

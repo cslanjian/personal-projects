@@ -14,6 +14,8 @@ node server.js
 然后浏览器打开 http://localhost:4173
 
 换端口：`PORT=5000 node server.js`
+仅本机访问（内测期推荐）：`HOST=127.0.0.1 node server.js`
+设置后服务只绑定回环地址，且应用层会拒绝一切非本机来源（基于 socket 真实来源，不信任可伪造的转发头）；不设置则监听所有网卡，局域网可访问。
 后台常驻（Mac 推荐方式，写一个 plist 或交给 launchd 管理，如需我可以帮你生成）。
 
 ## 部署到 NAS（支持麒麟 / UOS 的 amd64 + arm64）
@@ -31,6 +33,9 @@ docker run -d \
   -v /share/Container/personal-projects/data:/app/data \
   ghcr.io/cslanjian/personal-projects:latest
 ```
+
+> 内测期限本机访问：容器内不要用 `-e HOST=127.0.0.1`（会绑在容器自身的回环上，导致端口映射失效），
+> 正确做法是在 **NAS 侧**限制发布地址：`-p 127.0.0.1:4173:4173`（容器开放模式 + 只映射到宿主机回环）。
 
 局域网内访问 `http://NAS的IP:4173`。数据卷挂载到 NAS 本地目录，重建容器也不会丢数据。
 以后更新：本地改代码 → push 到 GitHub 自动构建 → NAS 上 `docker pull` 后重启容器。
