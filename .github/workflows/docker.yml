@@ -49,26 +49,23 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # 供无法直接 pull ghcr 的环境（如 udocker）离线导入
+      # 供无法直接 pull ghcr 的环境（如 udocker）离线导入；本阶段仅导出 arm64（麒麟 990 笔记本）
       - name: Export offline tarballs
         shell: bash
         run: |
           set -euo pipefail
-          for ARCH in amd64 arm64; do
-            echo "==> exporting linux/$ARCH"
-            docker buildx build \
-              --platform "linux/$ARCH" \
-              --cache-from type=gha \
-              --tag "personal-projects:$ARCH" \
-              --output "type=docker,dest=-" . | gzip > "personal-projects-$ARCH.tar.gz"
-            ls -lh "personal-projects-$ARCH.tar.gz"
-          done
+          echo "==> exporting linux/arm64"
+          docker buildx build \
+            --platform linux/arm64 \
+            --cache-from type=gha \
+            --tag personal-projects:arm64 \
+            --output "type=docker,dest=-" . | gzip > personal-projects-arm64.tar.gz
+          ls -lh personal-projects-arm64.tar.gz
 
       - name: Upload tarballs
         uses: actions/upload-artifact@v4
         with:
           name: offline-tarballs
           path: |
-            personal-projects-amd64.tar.gz
             personal-projects-arm64.tar.gz
           retention-days: 30

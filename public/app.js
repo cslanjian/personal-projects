@@ -534,8 +534,114 @@ function render() {
   else renderDashboard();
 }
 
-/* ---------- 启动 ---------- */
-(async () => {
+/* ---------- 登录模块 ---------- */
+let authState = { loginRequired: false, loggedIn: false };
+
+function openModal(id) { document.getElementById(id).classList.remove("hidden"); }
+function closeModal(id) { document.getElementById(id).classList.add("hidden"); }
+
+function showLogin(err) {
+  document.getElementById("login-msg").textContent = err || "";
+  openModal("login-overlay");
+}
+async function doLogin() {
+  const u = document.getElementById("login-user").value.trim();
+  const p = document.getElementById("login-pass").value;
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: u, password: p }),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    showLogin(e.error || "登录失败");
+    return;
+  }
+  const data = await res.json();
+  authState = { loginRequired: true, loggedIn: true, username: u, usingInitialPassword: !!data.usingInitialPassword };
+  closeModal("login-overlay");
+  document.getElementById("login-pass").value = "";
+  await initApp();
+  if (data.usingInitialPassword) {
+    openModal("pw-overlay");
+    document.getElementById("pw-msg").textContent = "你仍在使用初始密码（可查看 data/auth.json），请立即修改";
+  }
+}
+function pwStrengthLocal(pw) {
+  const reasons = [];
+  if (typeof pw !== "string" || pw.length < 12) reasons.push("长度至少 12 位");
+  if (!/[a-z]/.test(pw || "")) reasons.push("需含小写字母");
+  if (!/[A-Z]/.test(pw || "")) reasons.push("需含大写字母");
+  if (!/[0-9]/.test(pw || "")) reasons.push("需含数字");
+  if (!/[^A-Za-z0-9]/.test(pw || "")) reasons.push("需含特殊字符");
+  return reasons;
+}
+async function doChangePassword() {
+  const $msg = document.getElementById("pw-msg");
+  const cur = document.getElementById("pw-current").value;
+  const n1 = document.getElementById("pw-new").value;
+  const n2 = document.getElementById("pw-confirm").value;
+  if (n1 !== n2) { $msg.textContent = "两次输入的新密码不一致"; return; }
+  const bad = pwStrengthLocal(n1);
+  if (bad.length) { $msg.textContent = "新密码强度不足：" + bad.join("、"); return; }
+  const res = await fetch("/api/auth/change-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ currentPassword: cur, newPassword: n1 }),
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    $msg.textContent = e.error || "修改失败";
+    return;
+  }
+  ["pw-current", "pw-new", "pw-confirm"].forEach((id) => (document.getElementById(id).value = ""));
+  $msg.textContent = "";
+  authState.usingInitialPassword = false;
+  closeModal("pw-overlay");
+  $saveState.textContent = "密码已修改 ✓";
+  setTimeout(() => ($saveState.textContent = ""), 2500);
+}
+async function doLogout() {
+  await fetch("/api/auth/logout", { method: "POST" });
+  location.reload();
+}
+function renderUserArea() {
+  const el = document.getElementById("user-area");
+  if (authState.loginRequired && authState.loggedIn) {
+    el.innerHTML =
+      `<span class="user-name">👤 ${esc(authState.username || "")}</span>` +
+      `<button class="btn small" id="btn-chpw">改密</button>` +
+      `<button class="btn small" id="btn-logout">退出</button>`;
+    document.getElementById("btn-chpw").addEventListener("click", () => {
+      openModal("pw-overlay");
+      document.getElementById("pw-msg").textContent = "";
+    });
+    document.getElementById("btn-logout").addEventListener("click", doLogout);
+  } else {
+    el.innerHTML = "";
+  }
+}
+async function initApp() {
+  renderUserArea();
   await load();
   render();
+}
+
+/* ---------- 启动 ---------- */
+(async () => {
+  try {
+    authState = await fetch("/api/auth/status").then((r) => r.json());
+  } catch { /* 服务异常时仍尝试直接加载 */ }
+  document.getElementById("login-submit").addEventListener("click", doLogin);
+  ["login-user", "login-pass"].forEach((id) =>
+    document.getElementById(id).addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); })
+  );
+  document.getElementById("pw-submit").addEventListener("click", doChangePassword);
+  if (authState.loginRequired && !authState.loggedIn) {
+    showLogin();
+    document.getElementById("login-user").value = "lanjian";
+    document.getElementById("login-user").focus();
+    return;
+  }
+  await initApp();
 })();

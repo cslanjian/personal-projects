@@ -7,6 +7,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const PORT = process.env.PORT || 4173;
 /**
@@ -21,6 +22,14 @@ const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const DATA_DIR = path.join(ROOT, "data");
 const DATA_FILE = path.join(DATA_DIR, "data.json");
+const AUTH_FILE = path.join(DATA_DIR, "auth.json");
+
+/* ===== 登录模块 =====
+ * REQUIRE_LOGIN=1 首次启动时生效并写入 data/auth.json；
+ * 配置文件一旦存在，loginRequired 即被锁定，后续启动环境变量不再生效（不允许修改）。
+ */
+const sessions = new Map(); // token -> username（内存态，重启需重新登录）
+let AUTH = null;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -133,6 +142,105 @@ function ensureData() {
   }
 }
 
+/* ---- 密码工具 ---- */
+function pwStrength(pw) {
+  const reasons = [];
+  if (typeof pw !== "string" || pw.length < 12) reasons.push("长度至少 12 位");
+  if (!/[a-z]/.test(pw || "")) reasons.push("需含小写字母");
+  if (!/[A-Z]/.test(pw || "")) reasons.push("需含大写字母");
+  if (!/[0-9]/.test(pw || "")) reasons.push("需含数字");
+  if (!/[^A-Za-z0-9]/.test(pw || "")) reasons.push("需含特殊字符");
+  return reasons;
+}
+function makeSalt() {
+  return crypto.randomBytes(16).toString("hex");
+}
+function hashPassword(pw, salt) {
+  return crypto.scryptSync(String(pw), salt, 64).toString("hex");
+}
+function verifyPassword(pw, stored) {
+  const i = String(stored).indexOf(":");
+  if (i < 0) return false;
+  const salt = stored.slice(0, i);
+  const hash = stored.slice(i + 1);
+  const h = Buffer.from(hashPassword(pw, salt), "hex");
+  const e = Buffer.from(hash, "hex");
+  return h.length === e.length && crypto.timingSafeEqual(h, e);
+}
+function genStrongPassword() {
+  const lower = "abcdefghijkmnopqrstuvwxyz";
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const digit = "23456789";
+  const special = "!@#$%^&*+-_=?";
+  const all = lower + upper + digit + special;
+  const pick = (s) => s[crypto.randomInt(s.length)];
+  const chars = [pick(lower), pick(upper), pick(digit), pick(special)];
+  while (chars.length < 16) chars.push(pick(all));
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
+}
+function truthyEnv(v) {
+  return ["1", "true", "yes", "on"].includes(String(v || "").toLowerCase());
+}
+
+function ensureAuth() {
+  if (fs.existsSync(AUTH_FILE)) {
+    try {
+      AUTH = JSON.parse(fs.readFileSync(AUTH_FILE, "utf-8"));
+      if (typeof AUTH.loginRequired !== "boolean") AUTH.loginRequired = false;
+      if (process.env.REQUIRE_LOGIN !== undefined &&
+          truthyEnv(process.env.REQUIRE_LOGIN) !== AUTH.loginRequired) {
+        console.log(`[auth] 配置文件已锁定 是否登录=${AUTH.loginRequired}，忽略环境变量 REQUIRE_LOGIN=${process.env.REQUIRE_LOGIN}（不允许修改）`);
+      }
+      return;
+    } catch (err) {
+      console.error("[error] auth.json 解析失败:", err);
+      process.exit(1);
+    }
+  }
+  // 首次启动：以环境变量决定是否强制登录，并记录进配置文件
+  const loginRequired = truthyEnv(process.env.REQUIRE_LOGIN);
+  const initialPassword = genStrongPassword();
+  const salt = makeSalt();
+  AUTH = {
+    loginRequired,
+    username: "lanjian",
+    passwordHash: salt + ":" + hashPassword(initialPassword, salt),
+    initialPassword, // 修改密码后自动清除
+    createdAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(AUTH_FILE, JSON.stringify(AUTH, null, 2), "utf-8");
+  if (loginRequired) {
+    console.log("[auth] 首次启动：已创建登录配置 data/auth.json（是否登录=true，已锁定）");
+    console.log(`[auth] 初始账号: lanjian   初始密码: ${initialPassword}`);
+    console.log("[auth] ↑ 密码同样记录在 auth.json 中，登录后请立即修改");
+  } else {
+    console.log("[auth] 首次启动：未设置 REQUIRE_LOGIN，已记录 是否登录=false（已锁定；如需开启登录请删除 auth.json 后以 REQUIRE_LOGIN=1 重启）");
+  }
+}
+
+function getToken(req) {
+  const m = /(?:^|;\s*)pps_token=([A-Za-z0-9]+)/.exec(req.headers.cookie || "");
+  return m ? m[1] : null;
+}
+function isAuthed(req) {
+  const t = getToken(req);
+  return !!(t && sessions.get(t) === AUTH.username);
+}
+function saveAuth() {
+  fs.writeFileSync(AUTH_FILE, JSON.stringify(AUTH, null, 2), "utf-8");
+}
+async function readJSONBody(req) {
+  try {
+    return JSON.parse((await readBody(req)) || "{}");
+  } catch {
+    return {};
+  }
+}
+
 function readData() {
   const raw = fs.readFileSync(DATA_FILE, "utf-8");
   const data = JSON.parse(raw);
@@ -211,6 +319,59 @@ const server = http.createServer(async (req, res) => {
     return sendJSON(res, 403, { error: "本服务已配置为仅限本机访问" });
   }
 
+  /* ---- 登录相关接口（无需登录态） ---- */
+  if (pathname === "/api/auth/status") {
+    const logged = isAuthed(req);
+    return sendJSON(res, 200, {
+      loginRequired: AUTH.loginRequired,
+      loggedIn: logged,
+      username: logged ? AUTH.username : null,
+      usingInitialPassword: !!AUTH.initialPassword,
+    });
+  }
+  if (pathname === "/api/auth/login" && req.method === "POST") {
+    const b = await readJSONBody(req);
+    const ok = b.username === AUTH.username && verifyPassword(b.password || "", AUTH.passwordHash);
+    if (!ok) {
+      console.warn(`[auth] 登录失败: ${req.socket.remoteAddress} 用户名=${String(b.username || "").slice(0, 40)}`);
+      return sendJSON(res, 401, { error: "用户名或密码错误" });
+    }
+    const token = crypto.randomBytes(32).toString("hex");
+    sessions.set(token, AUTH.username);
+    res.setHeader("Set-Cookie", `pps_token=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`);
+    return sendJSON(res, 200, { ok: true, usingInitialPassword: !!AUTH.initialPassword });
+  }
+  if (pathname === "/api/auth/logout" && req.method === "POST") {
+    sessions.delete(getToken(req));
+    res.setHeader("Set-Cookie", "pps_token=; Path=/; Max-Age=0");
+    return sendJSON(res, 200, { ok: true });
+  }
+  if (pathname === "/api/auth/change-password" && req.method === "POST") {
+    if (AUTH.loginRequired && !isAuthed(req)) {
+      return sendJSON(res, 401, { error: "需要登录" });
+    }
+    const b = await readJSONBody(req);
+    if (!verifyPassword(b.currentPassword || "", AUTH.passwordHash)) {
+      return sendJSON(res, 401, { error: "当前密码不正确" });
+    }
+    const reasons = pwStrength(b.newPassword || "");
+    if (reasons.length) {
+      return sendJSON(res, 400, { error: "新密码强度不足：" + reasons.join("、") });
+    }
+    const salt = makeSalt();
+    AUTH.passwordHash = salt + ":" + hashPassword(b.newPassword, salt);
+    delete AUTH.initialPassword;
+    AUTH.passwordUpdatedAt = new Date().toISOString();
+    saveAuth();
+    console.log("[auth] 密码已修改（初始密码记录已清除）");
+    return sendJSON(res, 200, { ok: true });
+  }
+
+  /* ---- 应用层访问控制 ---- */
+  if (pathname.startsWith("/api/") && AUTH.loginRequired && !isAuthed(req)) {
+    return sendJSON(res, 401, { error: "需要登录" });
+  }
+
   if (pathname === "/api/data") {
     if (req.method === "GET") {
       return sendJSON(res, 200, readData());
@@ -239,6 +400,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 ensureData();
+ensureAuth();
 // 未显式指定 HOST 时绑定 0.0.0.0（IPv4 全网卡）：
 // Node 默认会绑定 IPv6 通配符 ::，部分网络环境（含本机自连局域网 IP）会出现请求无响应
 server.listen(PORT, HOST || "0.0.0.0", () => {

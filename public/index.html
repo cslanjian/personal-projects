@@ -15,10 +15,35 @@
     <button class="view-btn" data-view="timeline">时间线</button>
   </nav>
   <div class="top-right">
+    <div id="user-area" class="user-area"></div>
     <span id="save-state" class="save-state"></span>
     <button id="btn-add" class="btn primary">＋ 新建项目</button>
   </div>
 </header>
+
+<!-- 登录 -->
+<div id="login-overlay" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>🔐 登录 · 个人项目集</h3>
+    <div class="field"><label>用户名</label><input type="text" id="login-user" autocomplete="username" /></div>
+    <div class="field"><label>密码</label><input type="password" id="login-pass" autocomplete="current-password" /></div>
+    <div class="auth-msg" id="login-msg"></div>
+    <button class="btn primary" id="login-submit" style="width:100%">登录</button>
+  </div>
+</div>
+
+<!-- 修改密码 -->
+<div id="pw-overlay" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>🔑 修改密码</h3>
+    <div class="field"><label>当前密码</label><input type="password" id="pw-current" autocomplete="current-password" /></div>
+    <div class="field"><label>新密码</label><input type="password" id="pw-new" autocomplete="new-password" /></div>
+    <div class="field"><label>确认新密码</label><input type="password" id="pw-confirm" autocomplete="new-password" /></div>
+    <div class="auth-msg" id="pw-msg"></div>
+    <div class="pw-hint">强度要求：长度 ≥ 12 位，且同时包含大写字母、小写字母、数字、特殊字符</div>
+    <button class="btn primary" id="pw-submit" style="width:100%">保存新密码</button>
+  </div>
+</div>
 
 <main id="main"></main>
 
