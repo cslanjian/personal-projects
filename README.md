@@ -16,20 +16,38 @@ node server.js
 换端口：`PORT=5000 node server.js`
 后台常驻（Mac 推荐方式，写一个 plist 或交给 launchd 管理，如需我可以帮你生成）。
 
-## 部署到 NAS（群晖 / 威联通等，支持 Docker）
+## 部署到 NAS（支持麒麟 / UOS 的 amd64 + arm64）
+
+镜像已由 GitHub Actions 自动构建并发布（多架构，`docker pull` 自动匹配 CPU）：
 
 ```bash
-cd 个人项目集
-docker build -t personal-projects .
-docker run -d --name personal-projects -p 4173:4173 \
-  -v /volume1/docker/personal-projects/data:/app/data \
-  personal-projects
+docker pull ghcr.io/cslanjian/personal-projects:latest
+
+mkdir -p /share/Container/personal-projects/data
+docker run -d \
+  --name personal-projects \
+  --restart unless-stopped \
+  -p 4173:4173 \
+  -v /share/Container/personal-projects/data:/app/data \
+  ghcr.io/cslanjian/personal-projects:latest
 ```
 
-数据卷挂载到 NAS 本地目录，重建容器也不会丢数据。
-之后在局域网内任何设备访问 `http://NAS的IP:4173` 即可。
+局域网内访问 `http://NAS的IP:4173`。数据卷挂载到 NAS 本地目录，重建容器也不会丢数据。
+以后更新：本地改代码 → push 到 GitHub 自动构建 → NAS 上 `docker pull` 后重启容器。
 
 也可以配合 Tailscale / frp 等方案从外网访问；注意应用本身没有鉴权，**不要直接暴露公网**（如需可自己加反向代理 Basic Auth）。
+
+## 在 NAS 上本地构建（备选方案）
+
+不依赖 GitHub 时，把整个文件夹拷到 NAS，SSH 进入后：
+
+```bash
+docker build -t personal-projects:latest .
+mkdir -p /share/Container/personal-projects/data
+docker run -d --name personal-projects --restart unless-stopped -p 4173:4173 \
+  -v /share/Container/personal-projects/data:/app/data \
+  personal-projects:latest
+```
 
 ## 数据结构
 
